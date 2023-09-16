@@ -1,4 +1,4 @@
-module chrisprocter.co.uk/readsigs
+module github.com/chr15p/readsigs
 
 go 1.20
 
