@@ -10,7 +10,7 @@ const (
 	MAGICNUMBER = "~Module signature appended~\n"
 )
 
-type signature struct {
+type Signature struct {
 	Name       []byte
 	Kid        []byte
 	Signature  []byte
@@ -25,22 +25,22 @@ type signature struct {
 }
 
 
-type kmod struct{
+type Kmod struct{
     Name string
     Length uint64
     Content []byte
-    Signatures []signature
+    Signatures []Signature
     SigCount int
 }
 
 
-func GetKmod(filename string) (*kmod, error) {
+func GetKmod(filename string) (*Kmod, error) {
 	buffer, err := os.ReadFile(filename) // just pass the file name
 	if err != nil {
 		return nil, fmt.Errorf("Failed to open kmod %s:\n", err)
 	}
 
-    k := &kmod{
+    k := &Kmod{
             Name: filename,
             Length: uint64(len(buffer)),
             Content: buffer,
@@ -53,7 +53,7 @@ func GetKmod(filename string) (*kmod, error) {
 }
 
 
-func (k *kmod) parseSignatures() {
+func (k *Kmod) parseSignatures() {
 
     kmodLen := k.Length
 
@@ -73,7 +73,8 @@ func (k *kmod) parseSignatures() {
     return
 }
 
-func (k *kmod) checkMagic(offset uint64) bool {
+
+func (k *Kmod) checkMagic(offset uint64) bool {
     if offset == 0 {
         offset = k.Length
     }
@@ -83,13 +84,7 @@ func (k *kmod) checkMagic(offset uint64) bool {
 }
 
 
-
-
-
-
-
-
-func GetSignature(k *kmod) *signature {
+func GetSignature(k *Kmod) *Signature {
     kmodLen := k.Length
     if k.SigCount > 0 {
         kmodLen = k.Signatures[k.SigCount-1].Payloadlen
@@ -100,7 +95,7 @@ func GetSignature(k *kmod) *signature {
 		return nil
 	}
 
-	signatureSec := signature{}
+	signatureSec := Signature{}
 
 	offset := uint64(kmodLen - 40)
 

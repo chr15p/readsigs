@@ -1,21 +1,33 @@
 package main
 
 import (
-	//"crypto"
-	//"crypto/rsa"
-	//"crypto/sha256"
-	//"crypto/x509"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
 	//"encoding/binary"
 	"flag"
 	"fmt"
-	//"go.mozilla.org/pkcs7"
+	"go.mozilla.org/pkcs7"
 	"os"
+	"strings"
 
-//    "github.com/chr15p/readsigs/pkgs/kmod"
-    "github.com/chr15p/readsigs/pkgs/certlist"
+    "github.com/chr15p/readsigs/pkgs/kmod"
+    //"github.com/chr15p/readsigs/pkgs/certlist"
     "github.com/chr15p/readsigs/pkgs/certlist/cert"
     "github.com/chr15p/readsigs/pkgs/certlist/moklist"
 )
+
+
+
+type X509Cert interface {
+    GetRawCert() []byte
+    GetParsedCert() *x509.Certificate
+    GetPublicKey() *rsa.PublicKey
+    GetCertSubject() string
+    GetCertIssuer() string
+}
+
 
 func main() {
 	var kmodPath string
@@ -29,56 +41,89 @@ func main() {
 		fmt.Println("both the -kmod and -cert arguments are required")
 		os.Exit(0)
 	}
-    fmt.Println("kmod:", kmodPath)
-	fmt.Println("cert:", certPath)
 
-	//buffer, err := os.ReadFile(kmodPath) // just pass the file name
-/*
+    certFilesArr := strings.Split(certPath, ",")
+    //fmt.Println("kmod:", kmodPath)
+	//fmt.Println("cert:", certPath)
+
+
     kmod, err := kmod.GetKmod(kmodPath)
 	if err != nil {
 		fmt.Print(err)
 		os.Exit(1)
 	}
-    fmt.Printf("kmod %s has %d sigs\n", kmod.Name, kmod.SigCount)
-    for i,v := range kmod.Signatures {
-        fmt.Printf("i=%d sectionlen=%d\n", i, v.Siglen)
-    }
-*/
 
-    c, err := cert.NewCertFromFile(certPath)
+    ml, err := moklist.CertListFromMOKDB()
 	if err != nil {
 		fmt.Print(err)
 		os.Exit(1)
 	}
-
-
-    moklist, err := moklist.CertListFromMOKDB()
-	if err != nil {
-		fmt.Print(err)
-		os.Exit(1)
-	}
-
-
-    certlist := certlist.Certlist{}
-    certlist.AddCert(c)
-
-    for _,v := range *moklist {
-        fmt.Printf("cert %+v\n", v)
-        certlist.AddCert(v)
+ 
+    fmt.Println("checking MOKList")
+    for _,cert := range ml {
+        fmt.Printf("\t%s\n", cert.GetCertSubject())
+        match, err := checkSig(kmod, cert)
+        if err != nil {
+		    fmt.Printf("failed to check signature: %v\n", err)
+            continue
+        }
+        if match == true {
+	       // fmt.Printf("  signature verified\n\tsubject: %s\n\tserial: %s\n", cert.ParsedCert.Subject.ToRDNSequence(), cert.ParsedCert.SerialNumber)
+	        fmt.Printf("  signature verified\n\tsubject: %s\n\tIssuer: %s\n", cert.GetCertSubject(), cert.GetCertIssuer())
+        }
     }
 
-    for _,v := range certlist.List {
-        fmt.Printf("%+v\n", v)
+    for _, certPath := range certFilesArr {
+        certFile, err := cert.NewCertFromFile(certPath)
+	    if err != nil {
+		    fmt.Printf("%s: %v", certPath ,err)
+		    os.Exit(1)
+	    }
+        fmt.Println("\nParsed cert file", certFile.Filename)
+    
+        fmt.Println("\nchecking Certificate Files\n")
+        match, err := checkSig(kmod, certFile)
+        if err != nil {
+	        fmt.Printf("failed to check signature: %v\n", err)
+        }
+        if match == true {
+	        //fmt.Printf("  signature verified\n\tsubject: %s\n\tserial: %s\n", certFile.ParsedCert.Subject.ToRDNSequence(), certFile.ParsedCert.SerialNumber)
+	        fmt.Printf("  signature verified\n\tsubject: %s\n\tIssuer: %s\n", certFile.GetCertSubject(), certFile.GetCertIssuer())
+        }
     }
+    os.Exit(0)
 }
 
-/*
-func (s *signatureSection) getDigest() (*[]byte, error) {
 
-	sigCert, err := pkcs7.Parse(s.signature)
+func checkSig(k *kmod.Kmod, cert X509Cert) (bool, error) {
+
+// TODO: this is ugly and the hardwired zero doubly so
+    buffer := k.Content[:k.Signatures[0].Payloadlen]
+	hash := sha256.Sum256(buffer)
+
+    pubKey := cert.GetPublicKey()
+
+	sigDigest, err := getDigest(k)
 	if err != nil {
-		fmt.Print("ParseCertificat failed %s\n", err)
-		return nil, fmt.Errorf("ParseCertificate failed %s\n", err)
+		return false, err
+	}
+
+	err = rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], *sigDigest)
+	if err != nil {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+
+func getDigest(k *kmod.Kmod) (*[]byte, error) {
+// TODO: this is ugly and the hardwired zero doubly so
+    wrapper := 0
+
+	sigCert, err := pkcs7.Parse(k.Signatures[wrapper].Signature)
+	if err != nil {
+		return nil, fmt.Errorf("GetDigest() failed %s\n", err)
 	}
 	if len(sigCert.Signers) != 1 {
 		return nil, fmt.Errorf("Multiple signers found in signature\n")
@@ -87,36 +132,3 @@ func (s *signatureSection) getDigest() (*[]byte, error) {
 	return &sigCert.Signers[0].EncryptedDigest, nil
 }
 
-func (s *signatureSection) checkSig(buffer []byte, cert []byte) (bool, error) {
-
-	hash := sha256.Sum256(buffer)
-
-	pubCert, err := x509.ParseCertificate(cert)
-	if err != nil {
-		fmt.Printf("invalid public key %s\n", err)
-		return false, fmt.Errorf("invalid public key %s\n", err)
-	}
-
-	pubKey := pubCert.PublicKey.(*rsa.PublicKey)
-	if err != nil {
-		fmt.Printf("invalid public key %s\n", err)
-		return false, fmt.Errorf("invalid public key %s\n", err)
-	}
-
-	sigDigest, err := s.getDigest()
-	if err != nil {
-		return false, err
-	}
-
-	err = rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hash[:], *sigDigest)
-	if err != nil {
-		fmt.Printf("  signature not verified\n")
-		return false, nil
-	}
-
-
-	fmt.Printf("  signature verified\n\tsubject: %s\n\tserial: %s\n", pubCert.Subject.ToRDNSequence(), pubCert.SerialNumber)
-
-	return true, nil
-}
-*/

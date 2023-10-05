@@ -5,6 +5,7 @@ import (
     "fmt"
 
     "crypto/x509"
+    "crypto/rsa"
 )
 
 type Cert struct {
@@ -49,6 +50,19 @@ func (c *Cert) GetParsedCert() *x509.Certificate {
     return c.ParsedCert
 }
 
+func (c *Cert) GetPublicKey() *rsa.PublicKey {
+	pubKey := c.ParsedCert.PublicKey.(*rsa.PublicKey)
+    return pubKey
+}
+
+
+func (c *Cert) GetCertSubject() string {
+    return c.ParsedCert.Subject.ToRDNSequence().String()
+}
+
+func (c *Cert) GetCertIssuer() string {
+    return c.ParsedCert.Issuer.ToRDNSequence().String()
+}
 /*
 func (c *cert) checkSig(buffer []byte) (bool, error) {
 
